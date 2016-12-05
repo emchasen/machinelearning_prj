@@ -1,0 +1,114 @@
+---
+title: "Machine Learning Project"
+author: "E. Chasen"
+date: "12/4/2016"
+output: html_document
+---
+
+#Project Summary
+
+Personal fitness devices keep track of large amounts of data. People often use this data to make sure they are fulfilling a daily movement quota, but these devices have yet to be used to qualify how well the movements/exercises are performed. The goal of this analysis is to use data from 6 participants wearing personal fitness devices to see if we can predict the correct form for bicep curls. Participants were monitored by fitness experts to perform the activity in 5 different ways - 4 of which were incorrect, and 1 was correct. 
+
+```{r, message = FALSE, warning=FALSE}
+#install libraries
+library(caret)
+library(dplyr)
+library(rattle)
+```
+
+Download data
+```{r, cache = TRUE}
+train <- read.csv("pml-training.csv", na.strings = c("", "NA"))
+test <- read.csv("pml-testing.csv", na.strings = c("", "NA"))
+```
+
+Partition the training set:
+
+```{r, cache=TRUE}
+set.seed(1126)
+inTrain <- createDataPartition(y=train$classe, p=0.7, list = FALSE)
+testing <- train[-inTrain,] # test set
+training <- train[inTrain,] # training set
+```
+
+Examine data set:
+
+```{r, eval = FALSE}
+str(training)
+summary(training)
+head(training)
+```
+
+Because of the large numbers of missing data and observations, we will remove all variables that contain blanks and "NAs". We can also remove some of the first columns that contain time stamps and other data that will not correlate with the movement classe.
+
+```{r, cache=TRUE}
+#Clean the data sets
+training <- training[ , colSums(is.na(training)) == 0]
+training <- training[-c(1,3:7)]
+#summary(training)
+testing <- testing[ , colSums(is.na(testing)) == 0]
+testing <- testing[-c(1,3:7)]
+```
+
+Look for highly correlated variables and remove them.
+
+```{r, cache=TRUE}
+cordata <- training[-c(1, 54)] # removed person and classe from data set
+descrCorr <- cor(cordata)
+highCor <- findCorrelation(descrCorr, 0.9)
+corOut <- cordata[,-highCor]
+newtraindat <- cbind(training[c(1, 54)], corOut) # add person and classe back to data set
+# do same thing to testing set
+cortestdata <- testing[-c(1, 54)]
+cortestOut <- cortestdata[,-highCor]
+newtestdat <- cbind(testing[c(1, 54)], cortestOut)
+```
+
+Run a random forest model
+
+```{r, cache = TRUE, message=FALSE}
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+seed <- 7
+metric <- "Accuracy"
+set.seed(seed)
+mtry <- sqrt(ncol(newtraindat)-1)
+tunegrid <- expand.grid(.mtry=mtry)
+modRF <- train(classe ~ ., data = newtraindat, method = "rf", metric=metric, tuneGrid=tunegrid, trControl=control)
+```
+
+Examine in sample and out of sample error rates
+
+```{r, message=FALSE}
+issa <- modRF$results[2] # in sample accurracy
+pRF <- predict(modRF, newtestdat)
+confusionMatrix(pRF, newtestdat$classe)
+ossa <- confusionMatrix(pRF, newtestdat$classe)$overall[1] # out of sample accuracy
+```
+
+We see for the random forest model that the in sample accuracy is `r issa` and the out of sample accuracy is `r ossa`. These are both great results. 
+
+What are the important variables in this model?
+
+```{r}
+q <- varImp(modRF)
+plot(q)
+```
+
+The figure shows us that yaw belt, magnet dumbbell z, pitch belt, pitch forearm, magnet dumbbell y, and roll forearm are the five most important predictors. 
+
+Run a gradiant boosting model.
+ 
+```{r, cache = TRUE, message = FALSE}
+modGBM <- train(classe ~ ., data = newtraindat, method = "gbm", verbose = FALSE)
+```
+
+Calculate in and out of sample error rates.
+
+```{r}
+modGBM$results[2] # in sample accurracy
+pGBM <- predict(modGBM, newtestdat)
+confusionMatrix(pGBM, newtestdat$classe)
+ossa.gbm <- confusionMatrix(pGBM, newtestdat$classe)$overall[1] # out of sample accuracy
+```
+
+We see that the random forest model is more accurate. 
